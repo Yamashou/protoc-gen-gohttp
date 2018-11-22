@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
+	"google.golang.org/genproto/googleapis/api/annotations"
 )
 
 type Generator struct{}
@@ -54,7 +56,12 @@ func (g *Generator) Generate(req *plugin.CodeGeneratorRequest) (*plugin.CodeGene
 	// Generate response files from proto files.
 	respFiles := make([]*plugin.CodeGeneratorResponse_File, 0)
 	for _, f := range targetFiles {
-		respFiles = append(respFiles, g.genRespFile(f))
+		respFile, err := g.genRespFile(f)
+		if err != nil {
+			return nil, err
+		}
+
+		respFiles = append(respFiles, respFile)
 	}
 
 	// Format response files content.
@@ -99,15 +106,20 @@ func (g *Generator) genTarget(file *descriptor.FileDescriptorProto) *targetFile 
 	return nil
 }
 
-func (g *Generator) genRespFile(target *targetFile) *plugin.CodeGeneratorResponse_File {
+func (g *Generator) genRespFile(target *targetFile) (*plugin.CodeGeneratorResponse_File, error) {
 	buf := &bytes.Buffer{}
 	g.writePackage(buf, target.file)
 	g.writeImports(buf)
 	for _, service := range target.services {
 		g.writeService(buf, service.service)
 		for _, method := range service.methods {
-			if opts := method.GetOptions(); opts != nil {
-				fmt.Println(opts)
+			opts, err := extractAPIOptions(method)
+			if err != nil {
+				return nil, err
+			}
+			if opts != nil {
+				fmt.Printf("========== %#v ==========", opts)
+				fmt.Printf("========== %#v ==========", opts.GetGet())
 			}
 			g.writeMethod(buf, service.service, method)
 			g.writeMethodWithPath(buf, service.service, method)
@@ -116,7 +128,25 @@ func (g *Generator) genRespFile(target *targetFile) *plugin.CodeGeneratorRespons
 	return &plugin.CodeGeneratorResponse_File{
 		Name:    proto.String(basename(target.file.GetName()) + ".http.go"),
 		Content: proto.String(buf.String()),
+	}, nil
+}
+
+func extractAPIOptions(meth *descriptor.MethodDescriptorProto) (*annotations.HttpRule, error) {
+	if meth.Options == nil {
+		return nil, nil
 	}
+	if !proto.HasExtension(meth.Options, annotations.E_Http) {
+		return nil, nil
+	}
+	ext, err := proto.GetExtension(meth.Options, annotations.E_Http)
+	if err != nil {
+		return nil, err
+	}
+	opts, ok := ext.(*annotations.HttpRule)
+	if !ok {
+		return nil, fmt.Errorf("extension is %T; want an HttpRule", ext)
+	}
+	return opts, nil
 }
 
 func (g *Generator) writePackage(w io.Writer, f *descriptor.FileDescriptorProto) {
