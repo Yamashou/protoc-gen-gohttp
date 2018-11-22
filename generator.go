@@ -106,6 +106,9 @@ func (g *Generator) genRespFile(target *targetFile) *plugin.CodeGeneratorRespons
 	for _, service := range target.services {
 		g.writeService(buf, service.service)
 		for _, method := range service.methods {
+			if opts := method.GetOptions(); opts != nil {
+				fmt.Println(opts)
+			}
 			g.writeMethod(buf, service.service, method)
 			g.writeMethodWithPath(buf, service.service, method)
 		}
